@@ -376,6 +376,312 @@ crontab -e
 Для большинства случаев разработки и тестирования ручное обновление docker-compose pull && docker-compose up -dдоступно и безопасно. Для более полной автоматизации, особенно для «всегда включенных» систем Watchtower— отличное решение, которое можно легко интегрировать в ваш стек. Для особо важных производственных систем рассмотрите более сложные пайплайны CI/CD, которые включают тестирование перед развертыванием.
 
 
+# Разработка простого CI/CD Pipeline с использованием Jenkins
+## Задача: Настроить Jenkins Pipeline для автоматической сборки и деплоя приложения из GitHub. Необходимо реализовать базовый процесс интеграции и доставки, который включает сборку, тестирование и деплой на тестовый сервер.
+
+### Цель:
+Настроить Jenkins Pipeline, который будет:
+
+Отслеживать изменения в GitHub репозитории.
+Клонировать репозиторий.
+Собирать Java-приложение с помощью Maven.
+Запускать юнит-тесты.
+Архивировать собранный артефакт (JAR файл).
+Деплоить артефакт на удаленный тестовый сервер (например, копировать его по SSH).
+
+
+### Предварительные требования:
+Jenkins Server: Установленный и работающий Jenkins.
+(Рекомендуется Ubuntu/Debian)
+Java Development Kit (JDK): Установлен на Jenkins сервере.
+Maven: Установлен на Jenkins сервере.
+Git: Установлен на Jenkins сервере.
+GitHub Репозиторий: С простым Java Maven проектом.
+Тестовый сервер: Удаленная машина (даже VM или Docker-контейнер), доступная по SSH с Jenkins сервера. На ней должен быть установлен Java Runtime Environment (JRE) для запуска приложения.
+SSH Key Pair: Сгенерированная пара ключей SSH (public/private) для доступа с Jenkins на тестовый сервер без пароля. Публичный ключ должен быть на тестовом сервере (~/.ssh/authorized_keys), приватный ключ будет добавлен в Jenkins.
+
+## Часть 1: Подготовка окружения и приложения
+
+1. Настройка Jenkins Server:
+   
+Зайдите в Jenkins -> Manage Jenkins -> Manage Plugins.
+На вкладке Available, найдите и установите:
+   * GitHub Integration (или GitHub plugin если используете старую версию)
+   * Pipeline (обычно уже установлен)
+   * SSH Agent Plugin (для выполнения SSH команд с использованием ключей)
+   * Maven Integration plugin (для удобной настройки Maven, хотя для Pipeline это не строго обязательно)
+
+Перезапустите Jenkins при необходимости.
+
+* Настройка инструментов (JDK, Maven):
+* Зайдите в Jenkins -> Manage Jenkins -> Global Tool Configuration.
+* JDK:
+  * Нажмите Add Maven.
+  * Снимите галочку Install automatically.
+  * Укажите Name (например, Maven_3.8.6) и MAVEN_HOME путь (например, /opt/apache-maven-3.8.6).
+
+### 2. Подготовка GitHub репозитория с простым Java Maven проектом:
+
+Создайте новый публичный репозиторий на GitHub (например, simple-java-app-ci-cd). В корне репозитория создайте следующую структуру файлов:
+
+### ` pom.xml: `
+```yaml
+xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example.app</groupId>
+    <artifactId>simple-java-app</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>5.8.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>5.8.1</            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addClasspath>true</addClasspath>
+                            <mainClass>com.example.app.App</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.22.2</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+### `src/main/java/com/example/app/App.java:`
+```java
+java
+package com.example.app;
+
+import java.time.LocalDateTime;
+
+public class App {
+    public static void main(String[] args) {
+        System.out.println("Hello from simple-java-app!");
+        System.out.println("Current time: " + LocalDateTime.now());
+        System.out.println("Version: " + App.class.getPackage().getImplementationVersion());
+    }
+
+    public String getGreeting() {
+        return "Hello World!";
+    }
+}
+```
+### `src/test/java/com/example/app/AppTest.java:`
+```java
+java
+package com.example.app;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+public class AppTest {
+    @Test
+    void appHasAGreeting() {
+        App classUnderTest = new App();
+        assertEquals("Hello World!", classUnderTest.getGreeting(), "app should have a 'Hello World!' greeting");
+    }
+}
+```
+
+### 3. Настройка тестового сервера:
+
+### `Установите JRE:`
+```yaml
+sudo apt update
+sudo apt install openjdk-11-jre -y
+```
+
+### `Создайте директорию для деплоя:`
+```yaml
+mkdir -p /opt/simple-java-app
+```
+### `Настройте SSH доступ с Jenkins:`
+
+На Jenkins сервере сгенерируйте SSH ключ (если его нет):
+```yaml
+ssh-keygen -t rsa -b 4096 -C "jenkins-deploy-key" -f ~/.ssh/jenkins-deploy-key
+```
+Скопируйте публичный ключ (~/.ssh/jenkins-deploy-key.pub) на тестовый сервер в ~/.ssh/authorized_keys для пользователя, под которым будет происходить деплой (например, jenkinsuser или root для простоты, но лучше создавать отдельного пользователя).
+```yaml
+# На Jenkins сервере:
+ssh-copy-id -i ~/.ssh/jenkins-deploy-key.pub jenkinsuser@your_test_server_ip
+# или вручную:
+# scp ~/.ssh/jenkins-deploy-key.pub jenkinsuser@your_test_server_ip:/tmp/
+# Затем на тестовом сервере:
+# cat /tmp/jenkins-deploy-key.pub >> ~/.ssh/authorized_keys
+# chmod 600 ~/.ssh/authorized_keys
+```
+Убедитесь, что вы можете зайти с Jenkins сервера на тестовый по SSH без пароля:
+
+```yaml
+ssh -i ~/.ssh/jenkins-deploy-key jenkinsuser@your_test_server_ip "hostname"
+```
+### * Добавьте приватный SSH ключ в Jenkins:
+
+На Jenkins -> Manage Jenkins -> Manage Credentials.
+Нажмите (global) -> Add Credentials.
+Выберите Kind: SSH Username with private key.
+Scope: Global.
+ID: jenkins-deploy-key (запомните этот ID).
+Description: SSH key for deployment to test server.
+Username: jenkinsuser (пользователь на тестовом сервере).
+Private Key: Выберите Enter directly и вставьте содержимое вашего приватного ключа (~/.ssh/jenkins-deploy-key).
+Нажмите Create.
+
+## Часть 2: Создание Jenkins Pipeline
+
+1. Создание Jenkinsfile:
+
+В корне вашего GitHub репозитория simple-java-app-ci-cd создайте файл с именем Jenkinsfile.
+
+### `Jenkinsfile:`
+```groovy
+groovy
+pipeline {
+    // Агент, где будет выполняться пайплайн. 'any' означает, что он будет выполняться на любом доступном агенте.
+    agent any
+
+    // Переменные окружения, которые будут доступны на протяжении всего пайплайна
+    environment {
+        // Указываем ID credentials, которые мы добавили в Jenkins для SSH доступа к тестовому серверу
+        SSH_CREDENTIALS_ID = 'jenkins-deploy-key'
+        // IP или hostname вашего тестового сервера
+        TEST_SERVER_HOST = 'your_test_server_ip_or_hostname'
+        // Путь на тестовом сервере, куда будет деплоиться приложение
+        REMOTE_DEPLOY_DIR = '/opt/simple-java-app'
+        // Имя артефакта (JAR файла), который мы ожидаем получить после сборки Maven
+        ARTIFACT_NAME = 'simple-java-app-1.0.0-SNAPSHOT.jar'
+        // Имя сконфигурированного Maven в Jenkins Global Tool Configuration
+        M2_HOME_NAME = 'Maven_3.8.6' // Замените на имя, которое вы указали в Jenkins
+        // Имя сконфигурированного JDK в Jenkins Global Tool Configuration
+        JAVA_HOME_NAME = 'JDK_11'    // Замените на имя, которое вы указали в Jenkins
+    }
+
+    // Стадии выполнения пайплайна
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+                // Клонирование репозитория. Если репозиторий публичный, credentialsId не нужен.
+                // git branch: 'main', url: 'https://github.com/your-github-user/simple-java-app-ci-cd.git'
+                git branch: 'main', url: 'https://github.com/YOUR_GITHUB_USERNAME/simple-java-app-ci-cd.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo 'Building application with Maven...'
+                // Используем сконфигурированные JDK и Maven
+                withTools(jdk: "${JAVA_HOME_NAME}", maven: "${M2_HOME_NAME}") {
+                    sh 'mvn clean package -DskipTests' // Собираем проект, пропуская тесты на этапе сборки (они будут отдельной стадией)
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running unit tests...'
+                withTools(jdk: "${JAVA_HOME_NAME}", maven: "${M2_HOME_NAME}") {
+                    sh 'mvn test' // Запускаем юнит-тесты
+                }
+            }
+            post {
+                // Всегда публиковать отчеты по тестам, даже если тесты упали
+                always {
+                    junit '**/target/surefire-reports/*.xml' // Публикуем результаты тестов JUnit
+                }
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                echo 'Archiving built artifact...'
+                // Архивируем JAR файл, чтобы его можно было скачать из Jenkins
+                archiveArtifacts artifacts: "target/${ARTIFACT_NAME}", fingerprint: true
+            }
+        }
+
+        stage('Deploy to Test Server') {
+            steps {
+                echo "Deploying artifact to ${TEST_SERVER_HOST}:${REMOTE_DEPLOY_DIR}..."
+                // Используем ssh-agent для безопасного использования SSH ключа
+                sshagent(credentials: [SSH_CREDENTIALS_ID]) {
+                    // Копируем JAR файл на удаленный сервер
+                    sh "scp target/${ARTIFACT_NAME} ${env.JENKINS_SSH_SSH_USERNAME}@${TEST_SERVER_HOST}:${REMOTE_DEPLOY_DIR}/"
+
+                    // Выполняем удаленную команду: останавливаем старую версию, запускаем новую
+                    // Это простая реализация. В реальном мире здесь может быть systemd сервис, Docker контейнер и т.д.
+                    sh "ssh ${env.JENKINS_SSH_SSH_USERNAME}@${TEST_SERVER_HOST} " +
+                       "\"pkill -f ${ARTIFACT_NAME} || true; " + // Останавливаем старый процесс, если он есть
+                       "nohup java -jar ${REMOTE_DEPLOY_DIR}/${ARTIFACT_NAME} > ${REMOTE_DEPLOY_DIR}/app.log 2>&1 &\"" // Запускаем новую версию в фоне
+                }
+                echo "Deployment to ${TEST_SERVER_HOST} completed. Check logs on remote server for details."
+            }
+        }
+    }
+
+    // Действия, выполняемые после завершения всего пайплайна
+    post {
+        always {
+            echo 'Pipeline finished.'
+            // Здесь можно добавить уведомления (Slack, Email и т.д.)
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
+```
+
+
+
+
 
 
 
