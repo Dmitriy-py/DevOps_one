@@ -1090,16 +1090,333 @@ output "vm_public_ip" {
 
 Этот пример демонстрирует основы создания инфраструктуры с помощью Terraform. Вы можете расширять его, добавляя базы данных, балансировщики нагрузки, файловые хранилища и другие ресурсы, специфичные для вашего облачного провайдера.
 
+# Задача 4: Мониторинг серверов с Prometheus и Grafana
+Эта задача предполагает настройку комплексной системы мониторинга, которая позволит отслеживать состояние ваших серверов, визуализировать собранные данные и оперативно реагировать на потенциальные проблемы.
 
- 
+### Цели:
+  1. Сбор метрик: Настроить Prometheus для сбора основных метрик о состоянии системы с нескольких серверов.
+  2. Визуализация: Интегрировать Prometheus с Grafana для создания информативных дашбордов.
+  3. Оповещения: Настроить систему оповещений (Alertmanager) для уведомления о критических событиях.
+
+### Необходимые компоненты:
+   * Prometheus: Сервер мониторинга, который будет собирать и хранить метрики.
+   * Node Exporter: Экспортер метрик для операционной системы (CPU, RAM, диск, сеть).
+   * Grafana: Платформа для визуализации данных, которая будет подключаться к Prometheus.
+   * Alertmanager: Компонент, обрабатывающий оповещения, сгенерированные Prometheus.
+
+### Сценарий:
+Предположим, у нас есть два сервера (далее “сервер 1” и “сервер 2”), которые мы хотим мониторить.
+
+## Шаг 1: Установка и настройка Prometheus
+
+1.1 Установка Prometheus
+
+На сервере, где будет установлен Prometheus (это может быть отдельный сервер или один из серверов для мониторинга):
+
+ * Linux (Debian/Ubuntu):
+```yaml
+sudo apt update
+sudo apt install prometheus prometheus-node-exporter -y
+```
+
+* Linux (CentOS/RHEL):
+```yaml
+sudo yum install epel-release -y
+sudo yum install prometheus prometheus-node-exporter -y
+```
+1.2. Настройка Prometheus для сбора метрик
+
+Файл конфигурации Prometheus находится по пути /etc/prometheus/prometheus.yml. Откройте его для редактирования:
+```yaml
+sudo nano /etc/prometheus/prometheus.yml
+```
+Добавьте или измените секцию `scrape_configs` следующим образом:
+```yaml
+global:
+  scrape_interval: 15s # Интервал опроса метрик (по умолчанию 15 секунд)
+  evaluation_interval: 15s # Интервал оценки правил оповещений
+
+# Инструкции для Prometheus, чтобы он сам себя собирал
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Секция для мониторинга сервера 1
+  - job_name: 'server1_metrics'
+    static_configs:
+      - targets: ['<IP_АДРЕС_СЕРВЕРА_1>:9100'] # Замените на реальный IP-адрес сервера 1
+
+  # Секция для мониторинга сервера 2
+  - job_name: 'server2_metrics'
+    static_configs:
+      - targets: ['<IP_АДРЕС_СЕРВЕРА_2>:9100'] # Замените на реальный IP-адрес сервера 2
+```
+## Важно:
+
+  * Замените <IP_АДРЕС_СЕРВЕРА_1> и <IP_АДРЕС_СЕРВЕРА_2> на реальные IP-адреса ваших серверов.
+  * 9100 – это порт, на котором Node Exporter будет слушать входящие запросы.
+
+1.3. Перезапуск Prometheus
+
+```yaml
+sudo systemctl restart prometheus
+sudo systemctl enable prometheus # Чтобы Prometheus стартовал при загрузке системы
+```
+
+1.4. Проверка работы Prometheus
+
+ Откройте веб-интерфейс Prometheus в браузере: http://<IP_АДРЕС_СЕРВЕРА_PROMETHEUS>:9090. Перейдите в раздел “Status” -> “Targets”. Вы должны увидеть, что ваши серверы (server1_metrics, server2_metrics) имеют статус “UP”.
+
+##  Шаг 2: Установка и настройка Node Exporter на каждом сервере для мониторинга
+
+2.1. Установка Node Exporter
+
+На каждом сервере, который вы хотите мониторить (Сервер 1 и Сервер 2):
+
+  * Linux (Debian/Ubuntu):
+```yaml
+sudo apt update
+sudo apt install prometheus-node-exporter -y
+```
+  * Linux (CentOS/RHEL):
+```yaml
+sudo yum install epel-release -y
+sudo yum install prometheus-node-exporter -y
+```
+
+2.2. Запуск и настройка Node Exporter
+
+```yaml
+sudo systemctl status prometheus-node-exporter
+```
+Если сервис не запущен, запустите его:
+```
+sudo systemctl start prometheus-node-exporter
+sudo systemctl enable prometheus-node-exporter
+```
+Node Exporter по умолчанию слушает на порту 9100. Prometheus будет обращаться к этому порту на каждом сервере.
+
+## Шаг 3: Установка и настройка Grafana
+
+3.1. Установка Grafana
+
+На сервере, где будет установлен Grafana (это может быть отдельный сервер или сервер с Prometheus):
+
+  * Linux (Debian/Ubuntu):
+```yaml
+sudo apt update
+sudo apt install grafana -y
+```
+  * Linux (CentOS/RHEL):
+```yaml
+sudo yum install epel-release -y
+sudo yum install grafana -y
+```
+
+3.2. Запуск Grafana
+```yaml
+sudo systemctl start grafana-server
+sudo systemctl enable grafana-server
+```
+3.3. Добавление Prometheus как источника данных в Grafana
+
+1. Откройте веб-интерфейс Grafana: http://<IP_АДРЕС_СЕРВЕРА_GRAFANA>:3000.
+2. Логин по умолчанию: admin, пароль: admin. Вам будет предложено сменить пароль.
+3. В левом меню нажмите на значок “Configuration” (шестеренка) -> “Data sources”.
+4. Нажмите “Add data source”.
+5. Выберите “Prometheus”.
+6. В поле “URL” введите адрес вашего Prometheus сервера: http://<IP_АДРЕС_СЕРВЕРА_PROMETHEUS>:9090.
+7. Нажмите “Save & test”. Вы должны увидеть сообщение “Data source is working”.
+
+3.4. Создание дашборда с метриками серверов
+
+1. В левом меню нажмите на значок “Create” (плюсик) -> “Dashboard”.
+2. Нажмите “Add new panel”.
+3. В поле “Data source” выберите ваш Prometheus.
+4. В поле “Query” введите PromQL-запросы для отображения метрик. Вот несколько примеров:
+
+   * CPU Usage:
+       * Query: 100 - avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[$__interval])) * 100
+       * Legend: {{instance}} CPU Usage
+   * RAM Usage:
+       * Query: (node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes -                               node_memory_Cached_bytes) / node_memory_MemTotal_bytes * 100
+       * Legend: {{instance}} RAM Usage
+   * Disk I/O (Read/Write operations per second):
+       * Query: rate(node_disk_reads_completed_total[$__interval])
+       * Legend: {{instance}} Disk Reads
+       * Add another query for writes: rate(node_disk_writes_completed_total[$__interval])
+       * Legend: {{instance}} Disk Writes
+   * Network Traffic (Received/Sent bytes per second):
+       * Query: rate(node_network_receive_bytes_total{device!="lo"}[$__interval])
+       * Legend: {{instance}} Network Received
+       * Add another query for sent: rate(node_network_transmit_bytes_total{device!="lo"}[$__interval])
+       * Legend: {{instance}} Network Sent
+5. Настройте визуализацию (Graph, Stat, Gauge и т.д.) в правой части панели.
+6. Нажмите “Apply” для добавления панели.
+7. Повторите шаги 2-6 для добавления других метрик.
+8. Когда дашборд будет готов, нажмите “Save dashboard” (дискета в правом верхнем углу), дайте ему имя и сохраните.
+
+Совет: Вы можете импортировать готовые дашборды для Node Exporter. Найдите ID дашборда на Grafana.com/dashboards (например, “Node Exporter Full” ID: 1860) и импортируйте его через “Create” -> “Import”.
 
 
+## Шаг 4: Настройка оповещений с Alertmanager
 
+4.1 Установка Alertmanager
 
+На сервере, где установлен Prometheus (или на выделенном сервере):
 
+  * Linux (Debian/Ubuntu):
+```yaml
+sudo apt update
+sudo apt install prometheus-alertmanager -y
+```
+  * Linux (CentOS/RHEL):
+```yaml
+sudo yum install epel-release -y
+sudo yum install prometheus-alertmanager -y
+```
+4.2. Настройка Alertmanager
 
+Файл конфигурации Alertmanager находится по пути /etc/alertmanager/alertmanager.yml. Откройте его для редактирования:
+```yaml
+sudo nano /etc/alertmanager/alertmanager.yml
+```
+Пример конфигурации:
+```yaml
+global:
+  resolve_timeout: 5m # Время, через которое оповещение считается разрешенным, если проблема устранена
 
+route:
+  group_by: ['alertname', 'job'] # Группировка оповещений
+  group_wait: 30s # Время ожидания перед группировкой
+  group_interval: 5m # Время между отправкой оповещений одной группы
+  repeat_interval: 1h # Время между повторной отправкой уже активных оповещений
+  receiver: 'default-receiver' # Приемник по умолчанию
 
+  routes:
+    - receiver: 'critical-alerts'
+      matchers:
+        - severity="critical" # Оповещения с критической серьезностью
+
+receivers:
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'admin@example.com' # Ваш email для получения оповещений
+        from: 'alertmanager@example.com'
+        smarthost: 'smtp.example.com:587' # Ваш SMTP сервер
+        auth_username: 'alertmanager@example.com'
+        auth_password: 'your_smtp_password'
+        require_tls: true
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'urgent-admin@example.com' # Email для критических оповещений
+        from: 'alertmanager@example.com'
+        smarthost: 'smtp.example.com:587'
+        auth_username: 'alertmanager@example.com'
+        auth_password: 'your_smtp_password'
+        require_tls: true
+```
+## Важно:
+
+  * Замените admin@example.com, smtp.example.com:587, your_smtp_password и т.д. на ваши реальные данные для отправки           электронной почты.
+  * Если вы хотите использовать другие каналы оповещений (Slack, PagerDuty и т.д.), ознакомьтесь с документацией               Alertmanager.
+4.3. Перезапуск Alertmanager
+```yaml
+sudo systemctl restart alertmanager
+sudo systemctl enable alertmanager
+```
+4.4. Настройка Prometheus для отправки оповещений в Alertmanager
+```yaml
+# ... (остальная часть файла)
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['<IP_АДРЕС_СЕРВЕРА_ALERTMANAGER>:9093'] # Замените на IP и порт Alertmanager
+```
+Перезапустите Prometheus:
+```yaml
+sudo systemctl restart prometheus
+```
+4.5. Создание правил оповещений в Prometheus
+
+Создайте новый файл для правил оповещений, например, /etc/prometheus/rules.yml:
+
+```yaml
+sudo nano /etc/prometheus/rules.yml
+```
+Добавьте правила. Примеры:
+```yaml
+groups:
+  - name: node_alerts
+    rules:
+      - alert: HighCpuUsage
+        expr: avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage on {{ $labels.instance }} is above 80% for the last 5 minutes."
+
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space on {{ $labels.instance }} is below 10% for the last 10 minutes."
+
+      - alert: ServerNotReachable
+        expr: up{job="server1_metrics"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Server {{ $labels.instance }} is down"
+          description: "Prometheus cannot reach server {{ $labels.instance }}."
+```
+
+## Важно:
+
+  * expr: PromQL-выражение, которое определяет условие оповещения.
+  * for: Период времени, в течение которого условие должно выполняться, чтобы оповещение было сгенерировано.
+  * labels: Дополнительные метки для оповещений, которые можно использовать для маршрутизации в Alertmanager.
+  * annotations: Дополнительная информация, которая будет включена в уведомление.
+
+4.6. Подключение правил оповещений к Prometheus
+
+Откройте /etc/prometheus/prometheus.yml и добавьте путь к файлу с правилами:
+
+```yaml
+# ... (остальная часть файла)
+
+rule_files:
+  - "/etc/prometheus/rules.yml"
+```
+Перезапустите Prometheus:
+
+```yaml
+sudo systemctl restart prometheus
+```
+4.7. Проверка оповещений
+
+  * Откройте веб-интерфейс Alertmanager: http://<IP_АДРЕС_СЕРВЕРА_ALERTMANAGER>:9093. Вы должны увидеть список активных        оповещений (если они возникли).
+  * Вы также можете увидеть оповещения в интерфейсе Prometheus в разделе “Alerts”.
+  * Для проверки работы оповещений можете временно изменить пороги в правилах на более низкие значения, чтобы вызвать          срабатывание.
+
+### Дополнительные шаги и рекомендации:
+
+  * Безопасность: Убедитесь, что порты Prometheus, Grafana и Alertmanager доступны только доверенным лицам, или настройте      аутентификацию.
+  * Пользовательские метрики: Для мониторинга конкретных приложений (веб-серверов, баз данных) вам понадобятся                 соответствующие экспортеры (например, node_exporter для базовых системных метрик, blackbox_exporter для проверки           доступности сервисов, mysqld_exporter для MySQL и т.д.).
+  * Масштабирование: Для больших инфраструктур рассмотрите использование Prometheus Federation или Thanos.
+  * Резервное копирование: Настройте резервное копирование данных Prometheus и конфигураций Grafana/Alertmanager.
+  * Автоматизация: Используйте инструменты управления конфигурацией (Ansible, Chef, Puppet) для автоматизации установки и      настройки компонентов.
+
+Выполнение этих шагов позволит вам создать базовую, но эффективную систему мониторинга для ваших серверов, обеспечивая видимость их состояния и оперативную реакцию на проблемы.
 
 
 
