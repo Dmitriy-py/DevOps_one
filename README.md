@@ -735,7 +735,7 @@ ps aux | grep simple-java-app
 tail -f /opt/simple-java-app/app.log
 ```
 ## Дальнейшие улучшения (для продакшена):
-
+```yavl
 * Dockerization: Упаковать приложение в Docker образ и деплоить как Docker контейнер. Это значительно упрощает управление зависимостями и обеспечивает консистентность окружений.
 * Artifact Repository: Использовать Nexus, Artifactory или GitLab/GitHub Package Registry для хранения скомпилированных артефактов (JAR, Docker образов).
 * Parameterized Builds: Добавить параметры для билда (например, выбор ветки, версии деплоя, окружения).
@@ -746,6 +746,7 @@ tail -f /opt/simple-java-app/app.log
 * Rollback: Возможность отката на предыдущую версию в случае проблем.
 * Jenkins Shared Libraries: Для переиспользуемых частей пайплайна.
 Этот пример дает прочную основу для понимания и реализации базового CI/CD пайплайна с Jenkins.
+```
 
 
 
