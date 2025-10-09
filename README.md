@@ -735,7 +735,7 @@ ps aux | grep simple-java-app
 tail -f /opt/simple-java-app/app.log
 ```
 ## Дальнейшие улучшения (для продакшена):
-```yavl
+```yaml
 * Dockerization: Упаковать приложение в Docker образ и деплоить как Docker контейнер. Это значительно упрощает управление зависимостями и обеспечивает консистентность окружений.
 * Artifact Repository: Использовать Nexus, Artifactory или GitLab/GitHub Package Registry для хранения скомпилированных артефактов (JAR, Docker образов).
 * Parameterized Builds: Добавить параметры для билда (например, выбор ветки, версии деплоя, окружения).
