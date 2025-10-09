@@ -748,6 +748,379 @@ tail -f /opt/simple-java-app/app.log
 Этот пример дает прочную основу для понимания и реализации базового CI/CD пайплайна с Jenkins.
 ```
 
+# Создание инфраструктуры с помощью Terraform: Развертывание VM с сетью и статическим IP
+
+Этот пример покажет, как развернуть виртуальную машину (VM) в Yandex Cloud с настройкой сети и назначением статического IP-адреса с помощью Terraform. Вы можете адаптировать этот код для AWS, изменив провайдера и соответствующие ресурсы.
+
+### Предварительные условия:
+
+1. Установленный Terraform: Если у вас еще нет Terraform, скачайте и установите его с официального сайта:                      https://www.terraform.io/downloads.html
+2. Учетная запись Yandex Cloud: Убедитесь, что у вас есть учетная запись в Yandex Cloud и вы вошли в нее.
+3. CLI Yandex Cloud (yc): Установите и настройте CLI Yandex Cloud. Это необходимо для аутентификации Terraform.
+   * Установка: https://cloud.yandex.ru/docs/cli/operations/installation
+   * Аутентификация: yc init
+  
+## Шаг 1: Создание директории для Terraform
+
+Создайте новую директорию для вашего проекта Terraform.
+```yaml
+mkdir terraform-vm-yandex
+cd terraform-vm-yandex
+```
+## Шаг 2: Создание файлов Terraform
+
+Создайте два файла в этой директории:
+
+1. provider.tf (или main.tf) - для настройки провайдера.
+2. resources.tf - для определения инфраструктуры.
+
+### `provider.tf` (Настройка провайдера Yandex Cloud)
+```terraform
+# provider.tf
+
+terraform {
+  required_providers {
+    yandex = {
+      source  = "yandex-cloud/yandex"
+      version = "0.80.0" # Используйте актуальную версию провайдера
+    }
+  }
+}
+
+# Укажите здесь свой Folder ID и Zone.
+# Их можно получить из CLI Yandex Cloud или веб-консоли.
+# Пример: yc config list --profile <ваш_профиль>
+provider "yandex" {
+  cloud_id  = "<ВАШ_CLOUD_ID>"
+  folder_id = "<ВАШ_FOLDER_ID>"
+  zone      = "ru-central1-a" # Или любая другая доступная зона
+}
+```
+### Важно:
+
+  * Замените <ВАШ_CLOUD_ID> и <ВАШ_FOLDER_ID> на свои реальные идентификаторы. Вы можете найти их в веб-консоли Yandex          Cloud или с помощью команды yc config list.
+  * zone: Выберите подходящую зону доступности.
+
+### `resources.tf` (Определение инфраструктуры)
+```terraform
+# resources.tf
+
+# 1. Создание сети (VPC)
+resource "yandex_vpc_network" "default" {
+  name = "my-vpc-network"
+}
+
+# 2. Создание подсети (Subnet)
+resource "yandex_vpc_subnet" "subnet" {
+  name           = "my-subnet"
+  zone           = var.zone # Используем зону из переменной
+  network_id     = yandex_vpc_network.default.id
+  v4_cidr_blocks = ["10.0.1.0/24"]
+}
+
+# 3. Создание группы безопасности (Security Group)
+resource "yandex_vpc_security_group" "sg" {
+  name       = "allow-ssh-and-http"
+  network_id = yandex_vpc_network.default.id
+
+  # Разрешаем SSH (порт 22) из любого источника
+  ingress {
+    protocol       = "TCP"
+    from_port      = 22
+    to_port        = 22
+    v4_cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Разрешаем HTTP (порт 80) из любого источника (опционально)
+  ingress {
+    protocol       = "TCP"
+    from_port      = 80
+    to_port        = 80
+    v4_cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Разрешаем исходящий трафик
+  egress {
+    protocol       = "ANY"
+    from_port      = 0
+    to_port        = 0
+    v4_cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# 4. Создание динамического IP-адреса (IP Address)
+resource "yandex_vpc_address" "vm_ip" {
+  name = "my-vm-static-ip"
+  # Если вы хотите, чтобы IP был статическим и не менялся при пересоздании VM,
+  # он должен быть создан отдельно и затем привязан.
+  # Если IP нужен только для VM, можно привязать его прямо к VM.
+  # В данном случае, мы создадим его отдельно для большей гибкости.
+}
+
+# 5. Создание виртуальной машины (Compute Instance)
+resource "yandex_compute_instance" "vm" {
+  name = "my-terraform-vm"
+  platform_id = "standard-v1" # Пример платформы
+
+  resources {
+    memory = 2
+    cores  = 1
+  }
+
+  # Образ ОС (например, Ubuntu 20.04)
+  boot_disk {
+    initialize_params {
+      image_id = "ubuntu-2004-lts" # ID образа можно найти в документации Yandex Cloud
+    }
+  }
+
+  network_interface {
+    subnet_id          = yandex_vpc_subnet.subnet.id
+    nat                = false # Отключаем NAT, будем использовать статический IP
+    ip_address         = yandex_vpc_address.vm_ip.address # Привязываем статический IP
+    security_groups    = [yandex_vpc_security_group.sg.id]
+  }
+
+  metadata = {
+    ssh-keys = "user:<СОДЕРЖИМОЕ_ВАШЕГО_ПУБЛИЧНОГО_SSH_КЛЮЧА>" # Замените user и ключ
+  }
+
+  scheduling_policy {
+    preemptible = false # Не используем preemptible VM
+  }
+}
+
+# Переменные (опционально, для лучшей организации)
+variable "zone" {
+  description = "Зона доступности для ресурсов"
+  type        = string
+  default     = "ru-central1-a" # Должна совпадать с zone в provider.tf, если там тоже указана
+}
+
+# Вывод информации о VM
+output "vm_public_ip" {
+  description = "Публичный IP-адрес виртуальной машины"
+  value       = yandex_vpc_address.vm_ip.address
+}
+
+output "vm_name" {
+  description = "Имя виртуальной машины"
+  value       = yandex_compute_instance.vm.name
+}
+```
+### Важно:
+  * image_id: Найдите актуальный image_id для нужной вам операционной системы в документации Yandex Cloud (например, для        Ubuntu, CentOS, Debian).
+  * ssh-keys: Обязательно замените <СОДЕРЖИМОЕ_ВАШЕГО_ПУБЛИЧНОГО_SSH_КЛЮЧА> на содержимое вашего публичного SSH-ключа           (например, содержимое файла ~/.ssh/id_rsa.pub). Если у вас нет SSH-ключа, сгенерируйте его с помощью ssh-keygen.
+  * nat = false: Важно установить nat = false в network_interface для yandex_compute_instance, чтобы избежать                   автоматического назначения публичного IP через NAT, и использовать явно указанный ip_address.
+
+## Шаг 3: Инициализация Terraform
+
+Откройте терминал в директории вашего проекта (terraform-vm-yandex) и выполните:
+```yaml
+terraform init
+```
+Эта команда скачает провайдер Yandex Cloud и подготовит Terraform для работы.
+
+## Шаг 4: Планирование развертывания
+
+Перед внесением изменений в облако, всегда полезно посмотреть, что Terraform собирается сделать:
+
+```yaml
+terraform plan
+```
+Terraform покажет вам список ресурсов, которые будут созданы, изменены или удалены. Внимательно изучите вывод, чтобы убедиться, что все выглядит так, как вы ожидаете.
+
+## Шаг 5: Развертывание инфраструктуры
+
+Если terraform plan показал корректный план, можно приступить к развертыванию:
+```yaml
+terraform apply
+```
+
+Terraform снова покажет план и запросит подтверждение. Введите yes для продолжения.
+
+Terraform начнет создание сети, подсети, группы безопасности, статического IP-адреса и, наконец, виртуальной машины.
+
+## Шаг 6: Проверка развертывания
+
+После завершения `terraform apply`, вы увидите вывод, содержащий vm_public_ip и vm_name.
+```yaml
+Outputs:
+
+vm_name = "my-terraform-vm"
+vm_public_ip = "X.X.X.X" # Ваш статический IP-адрес
+```
+Вы можете использовать vm_public_ip для подключения к вашей виртуальной машине по SSH:
+```yaml
+ssh user@X.X.X.X # Замените user на имя пользователя (обычно то, которое вы указали в ssh-keys) и X.X.X.X на ваш IP
+```
+
+## Шаг 7: Уничтожение инфраструктуры
+
+Когда вам больше не нужна развернутая инфраструктура, вы можете безопасно ее удалить, чтобы избежать лишних расходов:
+```yaml
+terraform destroy
+```
+Terraform снова покажет план уничтожения и запросит подтверждение. Введите yes для продолжения.
+
+## Адаптация для AWS
+Если вы хотите развернуть VM в AWS, вам потребуется:
+1. Изменить `provider.tf:`
+   * Заменить yandex на aws.
+   * Настроить region, access_key, secret_key (или использовать переменные окружения/IAM роли).
+2. Изменить `resources.tf:`
+   * Заменить yandex_vpc_network на aws_vpc.
+   * Заменить yandex_vpc_subnet на aws_subnet.
+   * Заменить yandex_vpc_security_group на aws_security_group.
+   * Заменить yandex_vpc_address на aws_eip (Elastic IP Address).
+   * Заменить yandex_compute_instance на aws_instance.
+   * Использовать соответствующие ami_id для образов EC2.
+   * Настроить subnet_id и vpc_security_group_ids в aws_instance.
+Примерный код для AWS (только ресурсы, без деталей провайдера):
+```terraform
+# ... (в resources.tf для AWS)
+
+# 1. Создание VPC
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+  enable_dns_support = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "my-aws-vpc"
+  }
+}
+
+# 2. Создание подсети
+resource "aws_subnet" "subnet" {
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "us-east-1a" # Измените зону
+
+  tags = {
+    Name = "my-aws-subnet"
+  }
+}
+
+# 3. Создание группы безопасности
+resource "aws_security_group" "sg" {
+  name        = "allow-ssh-http"
+  description = "Allow SSH and HTTP inbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "SSH from anywhere"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "HTTP from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "my-aws-sg"
+  }
+}
+
+# 4. Создание Elastic IP (статический IP)
+resource "aws_eip" "vm_eip" {
+  domain = "vpc"
+}
+
+# 5. Создание EC2 Instance
+resource "aws_instance" "vm" {
+  ami           = "ami-0c55b159cbfafe1f0" # Пример AMI ID для Ubuntu 20.04 в us-east-1
+  instance_type = "t2.micro"
+  subnet_id     = aws_subnet.subnet.id
+  vpc_security_group_ids = [aws_security_group.sg.id]
+  associate_public_ip_address = false # Отключаем автоматическое назначение публичного IP
+
+  user_data = <<-EOF
+              #!/bin/bash
+              # Ваш скрипт для инициализации VM, например:
+              apt-get update
+              apt-get install -y nginx
+              systemctl start nginx
+              systemctl enable nginx
+              EOF
+
+  # Для подключения по SSH, вам нужно будет привязать Elastic IP после создания EC2.
+  # Или использовать AWS Systems Manager Session Manager.
+  # Если вы хотите привязать EIP здесь:
+  # network_interface {
+  #   network_interface_id = aws_network_interface.main.id
+  #   device_index = 0
+  # }
+  # Но для привязки EIP к EC2, часто проще использовать `aws_eip_association` после создания EC2.
+
+  tags = {
+    Name = "my-terraform-aws-vm"
+  }
+}
+
+# Связывание Elastic IP с EC2 instance (требует, чтобы instance был создан)
+resource "aws_eip_association" "eip_assoc" {
+  instance_id   = aws_instance.vm.id
+  allocation_id = aws_eip.vm_eip.id
+}
+
+# Вывод
+output "vm_public_ip" {
+  description = "Публичный IP-адрес EC2 инстанса"
+  value       = aws_eip.vm_eip.public_ip
+}
+```
+## Важно для AWS:
+ * AMI ID: Найдите актуальный ami_id для вашего региона и операционной системы.
+ * SSH Key: Для подключения по SSH к EC2, вам нужно будет создать aws_key_pair ресурс и указать его в aws_instance или        использовать key_name. Также user_data может быть использован для настройки SSH.
+
+Этот пример демонстрирует основы создания инфраструктуры с помощью Terraform. Вы можете расширять его, добавляя базы данных, балансировщики нагрузки, файловые хранилища и другие ресурсы, специфичные для вашего облачного провайдера.
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
