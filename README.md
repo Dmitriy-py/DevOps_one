@@ -679,12 +679,73 @@ pipeline {
 }
 ```
 
+### Важно:
 
+   * Замените YOUR_GITHUB_USERNAME на ваше имя пользователя GitHub.
+   * Замените your_test_server_ip_or_hostname на IP-адрес или hostname вашего тестового сервера.
+   * Убедитесь, что M2_HOME_NAME и JAVA_HOME_NAME соответствуют именам, которые вы задали в Global Tool Configuration            Jenkins.
+   * pkill -f ${ARTIFACT_NAME} || true означает “убить процесс, если он найден, иначе ничего не делать”. Это позволяет           избежать ошибок, если приложение еще не запущено.
+   * nohup ... & запускает приложение в фоновом режиме, отключаясь от SSH-сессии.
 
+### 2. Создание Jenkins Job:
 
+1. На главной странице Jenkins, нажмите New Item.
+2. Введите Item name (например, simple-java-app-pipeline).
+3. Выберите Pipeline и нажмите OK.
+4. На странице конфигурации:
+   * General:
+      * GitHub project: Вставьте URL вашего GitHub репозитория (например, https://github.com/YOUR_GITHUB_USERNAME/simple-           java-app-ci-cd).
+   * Build Triggers:
+     * Выберите GitHub hook trigger for GITScm polling. Это настроит Jenkins для прослушивания вебхуков от GitHub.
+     * (Опционально, для простых тестов) Вы можете также выбрать Poll SCM и установить расписание (например, * * * * * для         проверки каждую минуту), но вебхук более эффективен.
+   * Pipeline:
+     * Definition: Выберите Pipeline script from SCM.
+     * SCM: Git.
+     * Repository URL: URL вашего GitHub репозитория (например, https://github.com/YOUR_GITHUB_USERNAME/simple-java-app-ci-        cd.git).
+     * Credentials: Если ваш репозиторий приватный, добавьте здесь Username with password (ваш GitHub username и Personal          Access Token). Для публичного репозитория оставьте <none>.
+     * Branches to build: */main (или */master в зависимости от имени вашей основной ветки).
+     * Script Path: Jenkinsfile (это имя файла, который мы создали в корне репозитория).
+ 5. Нажмите Save.
 
+## Часть 3: Тестирование Pipeline
 
+### 1. Ручной запуск:
+  * На странице вашего Jenkins Job, нажмите Build Now.
+  * Наблюдайте за консольным выводом (Console Output) для каждой стадии, чтобы убедиться, что все шаги выполняются без          ошибок.
 
+### 2. Запуск по изменению в GitHub (через Webhook):
+  * В вашем GitHub репозитории перейдите в Settings -> Webhooks.
+  * Нажмите Add webhook.
+  * Payload URL: http://your_jenkins_ip_or_hostname:8080/github-webhook/ (замените your_jenkins_ip_or_hostname на               актуальный адрес вашего Jenkins).
+  * Content type: application/json.
+  * Secret: Оставьте пустым для простоты (в продакшене рекомендуется использовать секрет).
+  * Which events would you like to trigger this webhook?: Выберите Just the push event.
+  * Поставьте галочку Active.
+  * Нажмите Add webhook.
+  * Теперь сделайте небольшое изменение в вашем Java коде (например, в App.java) и запушьте его в main ветку.
+  * Вы должны увидеть, что Jenkins Job автоматически запустится.
+
+### Что происходит после деплоя?
+
+После успешного деплоя, на вашем тестовом сервере в директории /opt/simple-java-app появится simple-java-app-1.0.0-SNAPSHOT.jar и будет запущен как фоновый процесс. Вы можете проверить его статус:
+
+```yaml
+# На тестовом сервере
+ps aux | grep simple-java-app
+tail -f /opt/simple-java-app/app.log
+```
+## Дальнейшие улучшения (для продакшена):
+
+* Dockerization: Упаковать приложение в Docker образ и деплоить как Docker контейнер. Это значительно упрощает управление зависимостями и обеспечивает консистентность окружений.
+* Artifact Repository: Использовать Nexus, Artifactory или GitLab/GitHub Package Registry для хранения скомпилированных артефактов (JAR, Docker образов).
+* Parameterized Builds: Добавить параметры для билда (например, выбор ветки, версии деплоя, окружения).
+* Quality Gates: Интеграция со SonarQube для анализа качества кода.
+* Integration/E2E Tests: Добавить стадии для выполнения более сложных интеграционных или сквозных тестов после деплоя на      тестовый сервер.
+* Notifications: Настроить уведомления в Slack, по электронной почте о статусе пайплайна.
+* Blue/Green Deployment: Более сложные стратегии деплоя для минимизации даунтайма.
+* Rollback: Возможность отката на предыдущую версию в случае проблем.
+* Jenkins Shared Libraries: Для переиспользуемых частей пайплайна.
+Этот пример дает прочную основу для понимания и реализации базового CI/CD пайплайна с Jenkins.
 
 
 
