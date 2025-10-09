@@ -1418,9 +1418,136 @@ sudo systemctl restart prometheus
 
 Выполнение этих шагов позволит вам создать базовую, но эффективную систему мониторинга для ваших серверов, обеспечивая видимость их состояния и оперативную реакцию на проблемы.
 
+# 5. Автоматизация конфигурации с Ansible
+Задача: Написать Ansible Playbook для автоматической конфигурации удаленных серверов (например, установка Nginx и настройка базовой конфигурации безопасности).
 
+## Структура проекта Ansible
+Для лучшей организации создадим следующую структуру файлов:
+```yaml
+ansible_nginx_setup/
+├── inventory.ini
+├── nginx_setup.yml
+└── files/
+    └── index.html
+```
+## 1. Файл inventory.ini (Инвентарий)
 
+Определяет группы серверов, на которых будет производиться развертывание.
+```ini
+[webservers]
+server1 ansible_host=192.168.1.101
+server2 ansible_host=192.168.1.102
 
+[all:vars]
+ansible_user=your_ssh_user  # Замените на вашего пользователя (например, 'ubuntu' или 'ec2-user')
+ansible_become=yes          # Использовать sudo (become root)
+```
+
+## 2. Файл files/index.html (Контент для Nginx)
+
+Это простая HTML-страница, которую увидит пользователь после настройки.
+```yaml
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ansible Deployed Web Server</title>
+    <meta charset="utf-8">
+</head>
+<body>
+    <h1>Success!</h1>
+    <p>This web server was configured automatically using Ansible.</p>
+    <p>Hostname: <span id="hostname"></span></p>
+
+    <script>
+        document.getElementById('hostname').textContent = window.location.hostname || 'Unknown';
+    </script>
+</body>
+</html>
+```
+
+## 3. Ansible Playbook: nginx_setup.yml
+```yaml
+---
+- name: Автоматическая настройка Nginx и базовая безопасность
+  hosts: webservers
+  gather_facts: yes
+  become: yes # Все задачи выполняются от имени root
+
+  vars:
+    nginx_package_name: nginx
+    nginx_service_name: nginx
+    nginx_default_root: /var/www/html/
+
+  tasks:
+    # 1. Определяем ОС для совместимости
+    - name: Определяем переменные в зависимости от дистрибутива (для установки)
+      ansible.builtin.set_fact:
+        os_family: "{{ ansible_facts['os_family'] }}"
+        pkg_manager: "{{ 'apt' if ansible_facts['os_family'] == 'Debian' else 'yum' }}"
+
+    # 2. Установка Nginx
+    - name: Обновление кэша пакетов (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: os_family == "Debian"
+
+    - name: Установка Nginx
+      ansible.builtin.package:
+        name: "{{ nginx_package_name }}"
+        state: present
+
+    # 3. Настройка безопасности и контента
+    - name: Копируем наш кастомный index.html в корень веб-сервера
+      ansible.builtin.copy:
+        src: files/index.html
+        dest: "{{ nginx_default_root }}index.html"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Удаляем (или переименовываем) стандартную приветственную страницу (безопасность)
+      ansible.builtin.file:
+        path: "{{ nginx_default_root }}index.nginx-debian.html"
+        state: absent
+      # Эта страница существует только на Debian/Ubuntu, поэтому используем 'ignore_errors'
+      ignore_errors: yes
+
+    # 4. Управление сервисом
+    - name: Убеждаемся, что Nginx запущен и включен при загрузке
+      ansible.builtin.service:
+        name: "{{ nginx_service_name }}"
+        state: started
+        enabled: yes
+      
+    - name: Проверка, что firewall открыт (опционально, для RHEL/CentOS)
+      community.general.firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts['os_family'] == "RedHat"
+```
+
+## Как запустить Playbook
+
+1. Убедитесь, что у вас установлен Ansible и настроен SSH-доступ к вашим целевым серверам (с использованием ключей SSH, а не паролей, для автоматизации).
+2. Поместите файл inventory.ini, nginx_setup.yml и папку files/ в одну директорию.
+3. Запустите плейбук из корневой папки ansible_nginx_setup/:
+```yaml
+ansible-playbook -i inventory.ini nginx_setup.yml
+```
+
+## Что произойдет при запуске:
+
+1. Ansible подключится ко всем серверам, перечисленным в секции [webservers].
+2. Определит, что это за ОС (Debian/Ubuntu или RedHat/CentOS).
+3. Обновит списки пакетов и установит nginx.
+4. Скопирует ваш index.html поверх стандартного приветственного файла.
+5. Запустит службу Nginx и настроит ее автозапуск.
+6. Если это CentOS/RHEL, он также откроет порт HTTP в firewalld.
+
+После успешного выполнения, вы сможете открыть IP-адрес каждого сервера в браузере и увидеть вашу кастомную страницу “Success!”.
 
 
 
